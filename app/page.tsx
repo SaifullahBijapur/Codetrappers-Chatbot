@@ -21,9 +21,6 @@ const MAX_LEN = 2000;
 const STARTERS: { icon: (p: React.SVGProps<SVGSVGElement>) => ReactNode; label: string; prompt: string }[] = [
   { icon: I.Building, label: "Services", prompt: "What services does CodeTrappers offer?" },
   { icon: I.Briefcase, label: "Maintenance & retainers", prompt: "How does a monthly WordPress retainer work?" },
-  { icon: I.Alert, label: "Hacked or slow site", prompt: "My WordPress site got hacked. What should I do?" },
-  { icon: I.Refresh, label: "Migrations", prompt: "Can you migrate my store from Shopify to WooCommerce?" },
-  { icon: I.Sparkle, label: "AI solutions", prompt: "What AI services do you build, like chatbots or agents?" },
   { icon: I.Headset, label: "Get in touch", prompt: "How can I contact CodeTrappers or book a consultation?" },
 ];
 

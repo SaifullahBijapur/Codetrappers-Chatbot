@@ -111,7 +111,10 @@ export async function POST(req: Request) {
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
     async start(controller) {
-      const send = (o: unknown) => controller.enqueue(encoder.encode(JSON.stringify(o) + "\n"));
+      // The client may disconnect (e.g. "Stop"); ignore writes to a closed stream.
+      const send = (o: unknown) => {
+        try { controller.enqueue(encoder.encode(JSON.stringify(o) + "\n")); } catch { /* closed */ }
+      };
       try {
         // 1. Retrieval (skipped for greetings)
         let searchQuery = question;
@@ -183,7 +186,7 @@ export async function POST(req: Request) {
         console.error(e);
         send({ type: "error", message: "Something went wrong while answering. Please try again." });
       } finally {
-        controller.close();
+        try { controller.close(); } catch { /* already closed */ }
       }
     },
   });

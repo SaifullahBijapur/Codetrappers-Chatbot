@@ -1,6 +1,6 @@
 /**
  * Website scraper: crawls codetrappers.com via its sitemaps and saves each page
- * as a PDF in ./content/website/<type>/<slug>.pdf, ready for `npm run ingest`.
+ * as a PDF in ./content/<type>/<slug>.pdf, ready for `npm run ingest`.
  *
  * Pages are cleaned and converted to Markdown first, then rendered to PDF by
  * lib/pdf.ts, which stores title/url/access/type in the PDF metadata and uses a
@@ -21,24 +21,41 @@ import TurndownService from "turndown";
 import { writePdf, type DocMeta } from "../lib/pdf";
 
 const SITE = process.env.SCRAPE_SITE ?? "https://codetrappers.com";
-const OUT_DIR = path.join(process.cwd(), "content", "website");
+const OUT_DIR = path.join(process.cwd(), "content");
 const UA = "CodeTrappersAssistantBot/1.0 (+https://codetrappers.com)";
 const CONCURRENCY = 4;
 const DELAY_MS = 250;
 const MIN_CHARS = 200;
 
-/** Map sitemap name -> content type (also the output sub-folder). null = skip. */
+/**
+ * Map sitemap name -> content type (also the output sub-folder under content/).
+ * null = not scraped. The bot only needs current company knowledge, so the blog
+ * archive and the showcase portfolio are left out; set them back to "article" /
+ * "showcase" to include them again.
+ */
 const SITEMAP_TYPES: Record<string, string | null> = {
   page: "page",
-  post: "article",
   guides: "guide",
   casestudies: "case-study",
   research: "research",
   white_papers: "white-paper",
-  showcase: "showcase",
   jobs: "job",
+  post: null, // blog archive (~140 articles going back years)
+  showcase: null, // portfolio of past client sites
   category: null, // listing pages only, no unique content
 };
+/** Folders the scraper owns; only these are cleaned up. Hand-added files elsewhere in content/ are never touched. */
+/** At most this many documents per content folder (in sitemap order)... */
+const MAX_PER_TYPE = 13;
+/** ...except folders listed here, which keep every sitemap entry up to and including this URL. */
+const KEEP_UNTIL: Record<string, string> = {
+  page: `${SITE}/cookie-policy/`,
+};
+/** Extra pages always kept on top of the limits above (matched by URL path). */
+const ALWAYS_INCLUDE: Record<string, string[]> = {
+  page: ["/about/", "/contact/", "/services/", "/careers/", "/refund-cancellation-policy/", "/terms-conditions/"],
+};
+const MANAGED_DIRS = [...new Set(Object.values(SITEMAP_TYPES).filter((t): t is string => !!t))];
 
 const args = process.argv.slice(2);
 const argVal = (name: string) => {
@@ -73,13 +90,31 @@ async function collectUrls(): Promise<{ url: string; type: string }[]> {
     const key = /\/([a-z_]+)-sitemap\d*\.xml$/i.exec(sm)?.[1] ?? "";
     const type = key in SITEMAP_TYPES ? SITEMAP_TYPES[key] : "page";
     if (!type || (ONLY && !ONLY.includes(type))) continue;
-    for (const url of locs(await get(sm))) {
-      if (/\.(jpe?g|png|gif|webp|svg|pdf)$/i.test(url) || seen.has(url)) continue;
+    const urls = locs(await get(sm)).filter((u) => !/\.(jpe?g|png|gif|webp|svg|pdf)$/i.test(u) && !seen.has(u));
+    for (const url of limitForType(type, urls)) {
       seen.add(url);
       out.push({ url, type });
     }
   }
   return out;
+}
+
+/** Keep the knowledge base small: see KEEP_UNTIL and MAX_PER_TYPE. Order is the sitemap's. */
+function limitForType(type: string, urls: string[]): string[] {
+  const norm = (u: string) => u.replace(/\/+$/, "");
+  let kept = urls.slice(0, MAX_PER_TYPE);
+  const last = KEEP_UNTIL[type];
+  if (last) {
+    const i = urls.findIndex((u) => norm(u) === norm(last));
+    if (i >= 0) kept = urls.slice(0, i + 1);
+    else console.warn(`warning  ${last} not found in the ${type} sitemap; falling back to the first ${MAX_PER_TYPE}`);
+  }
+  for (const p of ALWAYS_INCLUDE[type] ?? []) {
+    const match = urls.find((u) => norm(new URL(u).pathname) === norm(p));
+    if (!match) console.warn(`warning  ${p} not found in the ${type} sitemap`);
+    else if (!kept.includes(match)) kept.push(match);
+  }
+  return kept;
 }
 
 const td = new TurndownService({
@@ -213,13 +248,10 @@ async function main() {
 
   // Remove files for pages no longer on the site (full runs only).
   let removed = 0;
-  if (!Number.isFinite(LIMIT) && !ONLY && failed.length === 0 && fs.existsSync(OUT_DIR)) {
-    const walk = (d: string): string[] =>
-      fs.readdirSync(d, { withFileTypes: true }).flatMap((e) =>
-        e.isDirectory() ? walk(path.join(d, e.name)) : [path.join(d, e.name)]
-      );
-    for (const f of walk(OUT_DIR)) {
-      if (!written.has(path.relative(OUT_DIR, f))) {
+  if (!Number.isFinite(LIMIT) && !ONLY && failed.length === 0) {
+    const scraped = MANAGED_DIRS.map((d) => path.join(OUT_DIR, d)).filter((d) => fs.existsSync(d));
+    for (const f of scraped.flatMap((d) => fs.readdirSync(d).map((name) => path.join(d, name)))) {
+      if (f.endsWith(".pdf") && !written.has(path.relative(OUT_DIR, f))) {
         fs.unlinkSync(f);
         removed++;
       }

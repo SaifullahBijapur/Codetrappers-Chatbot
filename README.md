@@ -1,7 +1,7 @@
 # CodeTrappers Chatbot: RAG Prototype
 
 Next.js (Vercel) + Supabase (Postgres, pgvector, RLS) + Claude + Voyage AI.
-A website assistant that answers questions about CodeTrappers (WordPress, WooCommerce and AI services, case studies, showcase, guides and articles, policies, careers, contact) from the content of codetrappers.com, and declines unrelated questions. Implements the approach in the design doc: structure-aware chunking, hybrid search (vector + keyword, fused with RRF), reranking, query rewriting with Haiku, grounded streamed answers with validated `[n]` citations, entitlement filtering, logging and thumbs feedback.
+A website assistant that answers questions about CodeTrappers (WordPress, WooCommerce and AI services, case studies, guides, research, policies, careers, contact) from the content of codetrappers.com, and declines unrelated questions. Implements the approach in the design doc: structure-aware chunking, hybrid search (vector + keyword, fused with RRF), reranking, query rewriting with Haiku, grounded streamed answers with validated `[n]` citations, entitlement filtering, logging and thumbs feedback.
 
 ## 1. Accounts and keys
 - Anthropic API key: https://console.anthropic.com
@@ -16,7 +16,7 @@ In the Supabase SQL editor, run `supabase/schema.sql` once.
 ```bash
 cp .env.example .env.local     # fill in the four values
 npm install
-npm run scrape                 # crawls codetrappers.com into ./content/website (about 380 pages, a few minutes)
+npm run scrape                 # crawls codetrappers.com into ./content (about 150 pages, a couple of minutes)
 npm run ingest                 # indexes ./content/**/*.{pdf,md} (re-run any time; only changed files are re-embedded)
 npm run dev                    # http://localhost:3000
 ```
@@ -30,7 +30,7 @@ Also try an off-topic question ("who won the match?"): the assistant should poli
 4. Deploy. Re-run `npm run scrape && npm run ingest` locally whenever the website changes (ingest writes straight to Supabase), or later move it to a Vercel Cron / Supabase webhook.
 
 ## 5. Website content (`npm run scrape`)
-`scripts/scrape.ts` reads `sitemap_index.xml`, fetches every page (4 at a time, politely), keeps only the `<main>` content (navigation, forms, chat widget, related-post teasers and sidebars are stripped), converts it to clean Markdown and renders that to a PDF at `content/website/<type>/<slug>.pdf` (via `lib/pdf.ts`). Types: `page`, `article`, `guide`, `case-study`, `research`, `white-paper`, `showcase`, `job`. Category listing pages are skipped. The site footer (phone, email, address) is saved once as `page/contact-details.pdf`.
+`scripts/scrape.ts` reads `sitemap_index.xml`, fetches every page (4 at a time, politely), keeps only the `<main>` content (navigation, forms, chat widget, related-post teasers and sidebars are stripped), converts it to clean Markdown and renders that to a PDF at `content/<type>/<slug>.pdf` (via `lib/pdf.ts`). Types: `page`, `guide`, `case-study`, `research`, `white-paper`, `job`. The blog archive, the showcase portfolio and category listings are deliberately skipped (see `SITEMAP_TYPES` in the script to include them). Cleanup on re-scrape only touches those type folders, so your own files elsewhere in `content/` are safe. The site footer (phone, email, address) is saved once as `page/contact-details.pdf`.
 
 - Each PDF stores its title in the PDF Title field and `url=...; access=public; type=...` in the Keywords field, which ingest reads back.
 - Headings use a fixed font-size scale; when ingesting, `lib/pdf.ts` maps sizes back to Markdown headings, so heading-aware chunking and the section labels in citations work as before.
@@ -38,7 +38,7 @@ Also try an off-topic question ("who won the match?"): the assistant should poli
 - On a full, error-free run, files for pages that left the sitemap are deleted; the next ingest removes them from the index.
 - `npm run scrape -- --limit 10` for a quick test, `npm run scrape -- --only page,guide` for some types.
 
-You can also add your own PDFs (brochures, proposals, policies) or hand-written Markdown anywhere else under `content/` (for example internal FAQs or pricing details not on the website).
+You can also add your own PDFs (brochures, proposals, policies) or hand-written Markdown in their own folder under `content/` (for example `content/internal/`) (for example internal FAQs or pricing details not on the website).
 
 ### Metadata for files you add
 For your own PDFs, set the document Title, and optionally put `url=...; access=enrolled; type=...` in the PDF Keywords; otherwise the file name is the title and access is `public`. Heading detection is tuned to the scraper's font sizes, so other PDFs are indexed as plain sections.

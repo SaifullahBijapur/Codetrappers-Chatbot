@@ -33,6 +33,16 @@ const FONTS = {
 
 type Seg = { text: string; bold?: boolean; link?: string };
 
+/**
+ * Remove characters the embedded font cannot draw (emoji, keycap/variation
+ * selectors, zero-width joiners) and control characters. Undrawable glyphs would
+ * otherwise come back from extraction as U+0000, which Postgres rejects.
+ */
+export const cleanText = (s: string) =>
+  s
+    .replace(/\p{Extended_Pictographic}|[\u{1F1E6}-\u{1F1FF}\u{1F3FB}-\u{1F3FF}︎️⃣‍]/gu, "")
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F�]/g, " ");
+
 const unescapeMd = (s: string) => s.replace(/\\([\\`*_{}\[\]()#+\-.!|>~])/g, "$1");
 
 /** Split a Markdown line into styled segments: **bold**, [text](url), `code`. */
@@ -76,8 +86,8 @@ export function writePdf(markdown: string, meta: DocMeta): Promise<Buffer> {
       margins: { top: 64, bottom: 64, left: 64, right: 64 },
       bufferPages: false,
       info: {
-        Title: meta.title,
-        Subject: meta.description ?? "",
+        Title: cleanText(meta.title),
+        Subject: cleanText(meta.description ?? ""),
         Keywords: [`url=${meta.url ?? ""}`, `access=${meta.access ?? "public"}`, `type=${meta.type ?? "page"}`].join("; "),
         Author: "CodeTrappers",
         Creator: "codetrappers-chatbot scraper",
@@ -105,7 +115,7 @@ export function writePdf(markdown: string, meta: DocMeta): Promise<Buffer> {
       gap(1);
     }
 
-    const lines = markdown.replace(/\r\n/g, "\n").split("\n");
+    const lines = cleanText(markdown.replace(/\r\n/g, "\n")).split("\n");
     let para: string[] = [];
     const flushPara = () => {
       if (!para.length) return;
@@ -211,11 +221,11 @@ export async function readPdf(data: Buffer | Uint8Array): Promise<{ meta: DocMet
     if (i > 0) kw[part.slice(0, i).trim()] = part.slice(i + 1).trim();
   }
   const meta: DocMeta = {
-    title: info.Title ?? "",
+    title: cleanText(info.Title ?? "").trim(),
     url: kw.url || undefined,
     access: kw.access || undefined,
     type: kw.type || undefined,
-    description: info.Subject || undefined,
+    description: cleanText(info.Subject ?? "").trim() || undefined,
   };
 
   // Rebuild visual lines from text items.
@@ -244,7 +254,7 @@ export async function readPdf(data: Buffer | Uint8Array): Promise<{ meta: DocMet
   let skippedSource = false;
   for (let i = 0; i < lines.length; i++) {
     const l = lines[i];
-    let text = l.text.replace(/\s+/g, " ").trim();
+    let text = cleanText(l.text).replace(/\s+/g, " ").trim();
     if (!skippedSource && i === 0 && text.startsWith("Source: ")) {
       skippedSource = true;
       continue;

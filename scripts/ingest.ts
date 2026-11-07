@@ -21,7 +21,7 @@ import { createHash } from "node:crypto";
 import { createClient } from "@supabase/supabase-js";
 import { chunkMarkdown } from "../lib/chunk";
 import { embed } from "../lib/voyage";
-import { readPdf } from "../lib/pdf";
+import { readPdf, cleanText } from "../lib/pdf";
 
 const db = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!, {
   auth: { persistSession: false },
@@ -49,6 +49,25 @@ function parse(raw: string) {
   return { meta, body: m ? raw.slice(m[0].length) : raw };
 }
 
+// ~16 chunks x ~500 tokens stays under the Voyage free tier's 10K tokens/minute.
+const EMBED_BATCH = Number(process.env.EMBED_BATCH ?? 16);
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/** Embed with patient retries on Voyage rate limits (429), e.g. the free tier's 3 requests/minute. */
+async function embedWithRetry(texts: string[], attempts = 8): Promise<number[][]> {
+  for (let i = 1; ; i++) {
+    try {
+      return await embed(texts, "document");
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (!msg.includes(" 429 ") || i >= attempts) throw e;
+      const wait = Math.min(25_000 * i, 90_000);
+      console.log(`         rate limited by Voyage, waiting ${wait / 1000}s (attempt ${i}/${attempts - 1})`);
+      await sleep(wait);
+    }
+  }
+}
+
 async function main() {
   const files = walk(CONTENT_DIR);
   const seen = new Set<string>();
@@ -60,8 +79,9 @@ async function main() {
     const hash = createHash("sha256").update(bytes).digest("hex");
 
     const { data: existing } = await db
-      .from("documents").select("id, content_hash").eq("source_path", rel).maybeSingle();
-    if (existing?.content_hash === hash) {
+      .from("documents").select("id, content_hash, chunks(count)").eq("source_path", rel).maybeSingle();
+    const chunkCount = (existing?.chunks as { count: number }[] | undefined)?.[0]?.count ?? 0;
+    if (existing?.content_hash === hash && chunkCount > 0) {
       console.log(`skip     ${rel}`);
       continue;
     }
@@ -80,14 +100,18 @@ async function main() {
       ({ meta, body } = parse(bytes.toString("utf8")));
     }
 
-    const title = meta.title ?? path.basename(file, path.extname(file));
+    // Postgres text cannot hold U+0000 and friends; strip them from any source.
+    body = cleanText(body);
+    const title = cleanText(meta.title ?? path.basename(file, path.extname(file))).trim();
     const access = ["public", "enrolled", "paid"].includes(meta.access) ? meta.access : "public";
 
     const { data: doc, error } = await db.from("documents").upsert(
       {
         source_path: rel, title, url: meta.url ?? null,
         content_type: meta.type ?? "lesson", access_level: access,
-        content_hash: hash, updated_at: new Date().toISOString(),
+        // Real hash is written only after the chunks are stored, so a run that
+        // fails half-way (e.g. rate limit) re-processes this file next time.
+        content_hash: "pending", updated_at: new Date().toISOString(),
       },
       { onConflict: "source_path" }
     ).select("id").single();
@@ -97,9 +121,9 @@ async function main() {
 
     const chunks = chunkMarkdown(body, title);
     const rows: Record<string, unknown>[] = [];
-    for (let i = 0; i < chunks.length; i += 64) {
-      const batch = chunks.slice(i, i + 64);
-      const vectors = await embed(batch.map((c) => c.content), "document");
+    for (let i = 0; i < chunks.length; i += EMBED_BATCH) {
+      const batch = chunks.slice(i, i + EMBED_BATCH);
+      const vectors = await embedWithRetry(batch.map((c) => c.content));
       batch.forEach((c, j) =>
         rows.push({
           document_id: doc.id, chunk_index: i + j, section_path: c.section,
@@ -110,6 +134,8 @@ async function main() {
     }
     const { error: insErr } = await db.from("chunks").insert(rows);
     if (insErr) throw insErr;
+    const { error: hashErr } = await db.from("documents").update({ content_hash: hash }).eq("id", doc.id);
+    if (hashErr) throw hashErr;
     console.log(`indexed  ${rel} (${rows.length} chunks, ${access})`);
   }
 

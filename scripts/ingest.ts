@@ -31,6 +31,7 @@ function walk(dir: string): string[] {
 }
 
 function parse(raw: string) {
+  raw = raw.replace(/\r\n/g, "\n"); // tolerate CRLF checkouts on Windows
   const m = /^---\n([\s\S]*?)\n---\n?/.exec(raw);
   const meta: Record<string, string> = {};
   if (m) {

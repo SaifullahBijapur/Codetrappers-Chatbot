@@ -1,7 +1,7 @@
 # CodeTrappers Chatbot: RAG Prototype
 
 Next.js (Vercel) + Supabase (Postgres, pgvector, RLS) + Claude + Voyage AI.
-A company assistant that answers questions about CodeTrappers (offerings, pricing, billing, accounts, policies, support) from CodeTrappers' own content, and declines unrelated or general coding questions. Implements the approach in the design doc: structure-aware chunking, hybrid search (vector + keyword, fused with RRF), reranking, query rewriting with Haiku, grounded streamed answers with validated `[n]` citations, entitlement filtering, logging and thumbs feedback.
+A website assistant that answers questions about CodeTrappers (WordPress, WooCommerce and AI services, case studies, showcase, guides and articles, policies, careers, contact) from the content of codetrappers.com, and declines unrelated questions. Implements the approach in the design doc: structure-aware chunking, hybrid search (vector + keyword, fused with RRF), reranking, query rewriting with Haiku, grounded streamed answers with validated `[n]` citations, entitlement filtering, logging and thumbs feedback.
 
 ## 1. Accounts and keys
 - Anthropic API key: https://console.anthropic.com
@@ -16,20 +16,27 @@ In the Supabase SQL editor, run `supabase/schema.sql` once.
 ```bash
 cp .env.example .env.local     # fill in the four values
 npm install
+npm run scrape                 # crawls codetrappers.com into ./content/website (about 380 pages, a few minutes)
 npm run ingest                 # indexes ./content/**/*.md (re-run any time; only changed files are re-embedded)
 npm run dev                    # http://localhost:3000
 ```
-Try: "What does CodeTrappers offer?", "How do I get a refund?", "What are the pricing plans?"
-Also try an off-topic question ("write a Python sorting function"): the assistant should politely decline. And ask "what are the member benefits?": that file is `access: enrolled`, so anonymous users get a "could not find it" answer. That is the access filter working.
+Try: "What services does CodeTrappers offer?", "How does a monthly retainer work?", "My WordPress site got hacked, what should I do?", "How do I contact you?"
+Also try an off-topic question ("who won the match?"): the assistant should politely decline.
 
 ## 4. Deploy to Vercel
 1. Push this folder to a GitHub repo.
 2. Import it in Vercel.
 3. Add the env vars from `.env.example` (Settings > Environment Variables).
-4. Deploy. Re-run `npm run ingest` locally whenever content changes (it writes straight to Supabase), or later move it to a Vercel Cron / Supabase webhook.
+4. Deploy. Re-run `npm run scrape && npm run ingest` locally whenever the website changes (ingest writes straight to Supabase), or later move it to a Vercel Cron / Supabase webhook.
 
-## 5. Replace the sample content
-Every file in `content/` is SAMPLE placeholder text. Delete them and add your real company material (about, pricing, policies, FAQs, course catalogue, announcements, contact details).
+## 5. Website content (`npm run scrape`)
+`scripts/scrape.ts` reads `sitemap_index.xml`, fetches every page (4 at a time, politely), keeps only the `<main>` content (navigation, forms, chat widget, related-post teasers and sidebars are stripped), converts it to Markdown and writes `content/website/<type>/<slug>.md`. Types: `page`, `article`, `guide`, `case-study`, `research`, `white-paper`, `showcase`, `job`. Category listing pages are skipped. The site footer (phone, email, address) is saved once as `page/contact-details.md`.
+
+- Output is deterministic, so a re-scrape only changes files whose page changed, and ingest re-embeds only those.
+- On a full, error-free run, files for pages that left the sitemap are deleted; the next ingest removes them from the index.
+- `npm run scrape -- --limit 10` for a quick test, `npm run scrape -- --only page,guide` for some types.
+
+You can also add hand-written Markdown anywhere else under `content/` (for example internal FAQs or pricing details not on the website).
 
 ### Front matter
 Drop Markdown files into `content/` with front matter:
@@ -52,7 +59,7 @@ Deleted files are removed from the index on the next ingest.
 ## Prototype limits (next steps from the roadmap)
 - Rate limiting is in-memory per serverless instance; use Upstash/Vercel KV for strict limits.
 - No eval harness yet: build the golden set (50 to 300 questions) and measure Recall@5 and faithfulness before tuning chunk size.
-- Only Markdown ingestion; add loaders for your CMS, forum (accepted answers only) and code repos.
+- Scraped pages are all `access: public`. Put private material (for example client-only docs) in hand-written files with `access: enrolled` or `paid`.
 - Model names default to `claude-sonnet-5-5` and `claude-haiku-5-5`; override with `ANSWER_MODEL` / `FAST_MODEL`.
 - Conversation memory is the last 10 messages; add a rolling summary for long chats.
 - The `@anthropic-ai/sdk` range is `>=0.39.0`; pin it to the version npm installs once it works for you.

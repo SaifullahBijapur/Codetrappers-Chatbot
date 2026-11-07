@@ -7,7 +7,7 @@ const mono = JetBrains_Mono({ subsets: ["latin"], variable: "--font-mono" });
 
 export const metadata: Metadata = {
   title: "CodeTrappers Assistant",
-  description: "Ask about CodeTrappers and get answers with sources.",
+  description: "Ask about CodeTrappers WordPress, WooCommerce and AI services and get answers with sources.",
 };
 
 export const viewport: Viewport = {

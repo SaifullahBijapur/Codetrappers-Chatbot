@@ -19,12 +19,12 @@ type Msg = {
 const MAX_LEN = 2000;
 
 const STARTERS: { icon: (p: React.SVGProps<SVGSVGElement>) => ReactNode; label: string; prompt: string }[] = [
-  { icon: I.Building, label: "About us", prompt: "What does CodeTrappers offer?" },
-  { icon: I.Tag, label: "Plans & pricing", prompt: "What are the pricing plans?" },
-  { icon: I.Card, label: "Billing & refunds", prompt: "How do I get a refund?" },
-  { icon: I.User, label: "Account & login", prompt: "I can't log in to my account. What should I do?" },
-  { icon: I.Headset, label: "Contact support", prompt: "How can I contact support?" },
-  { icon: I.Briefcase, label: "Careers", prompt: "Is CodeTrappers hiring right now?" },
+  { icon: I.Building, label: "Services", prompt: "What services does CodeTrappers offer?" },
+  { icon: I.Briefcase, label: "Maintenance & retainers", prompt: "How does a monthly WordPress retainer work?" },
+  { icon: I.Alert, label: "Hacked or slow site", prompt: "My WordPress site got hacked. What should I do?" },
+  { icon: I.Refresh, label: "Migrations", prompt: "Can you migrate my store from Shopify to WooCommerce?" },
+  { icon: I.Sparkle, label: "AI solutions", prompt: "What AI services do you build, like chatbots or agents?" },
+  { icon: I.Headset, label: "Get in touch", prompt: "How can I contact CodeTrappers or book a consultation?" },
 ];
 
 /** Turn [n] markers into links to the matching source, leaving code untouched. */
@@ -245,7 +245,7 @@ export default function Home() {
               <div className="welcome-mark"><I.Logo width={44} height={44} /></div>
               <h1>How can we help you today?</h1>
               <p>
-                Ask about courses, plans and pricing, billing, your account or support. Every answer is drawn from
+                Ask about our WordPress, WooCommerce and AI services, past projects, pricing or how to get started. Every answer is drawn from
                 official CodeTrappers pages and links back to its source.
               </p>
               <div className="starters">
@@ -399,7 +399,7 @@ export default function Home() {
               value={input}
               rows={1}
               maxLength={MAX_LEN}
-              placeholder="Ask about courses, pricing, billing or support…"
+              placeholder="Ask about services, projects, WordPress help or getting in touch…"
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
@@ -421,7 +421,7 @@ export default function Home() {
             )}
           </form>
           <div className="footnote">
-            <span>Answers come from CodeTrappers help content and can be wrong. Check the cited sources.</span>
+            <span>Answers come from codetrappers.com and can be wrong. Check the cited sources.</span>
             {input.length > MAX_LEN * 0.8 && (
               <span className={`count${input.length >= MAX_LEN ? " max" : ""}`}>{input.length}/{MAX_LEN}</span>
             )}

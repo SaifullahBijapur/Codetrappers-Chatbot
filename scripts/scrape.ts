@@ -1,13 +1,16 @@
 /**
- * Website scraper: crawls codetrappers.com via its sitemaps and writes each page
- * as Markdown (with front matter) into ./content/website/<type>/<slug>.md,
- * ready for `npm run ingest`.
+ * Website scraper: crawls codetrappers.com via its sitemaps and saves each page
+ * as a PDF in ./content/website/<type>/<slug>.pdf, ready for `npm run ingest`.
+ *
+ * Pages are cleaned and converted to Markdown first, then rendered to PDF by
+ * lib/pdf.ts, which stores title/url/access/type in the PDF metadata and uses a
+ * fixed heading-size scale so ingest can rebuild the document structure.
  *
  *   npm run scrape                       # whole site
  *   npm run scrape -- --limit 10         # quick test run
  *   npm run scrape -- --only page,guide  # only some content types
  *
- * Output is deterministic (no timestamps), so unchanged pages keep the same hash
+ * Output is deterministic (fixed PDF dates), so unchanged pages keep the same hash
  * and ingest skips them. Pages that disappear from the sitemap are deleted, and
  * ingest then removes them from the index.
  */
@@ -15,6 +18,7 @@ import fs from "node:fs";
 import path from "node:path";
 import * as cheerio from "cheerio";
 import TurndownService from "turndown";
+import { writePdf, type DocMeta } from "../lib/pdf";
 
 const SITE = process.env.SCRAPE_SITE ?? "https://codetrappers.com";
 const OUT_DIR = path.join(process.cwd(), "content", "website");
@@ -133,15 +137,19 @@ function toMarkdown(html: string, url: string) {
   if (description && !md.includes(description.slice(0, 60))) {
     md = md.replace(/^(# .*\n)/, `$1\n${description}\n`);
   }
-  return { title, md };
+  return { title, description, md };
+}
+
+async function save(rel: string, md: string, meta: DocMeta) {
+  const file = path.join(OUT_DIR, rel);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, await writePdf(md, meta));
 }
 
 function slugFor(url: string) {
   const p = new URL(url).pathname.replace(/^\/+|\/+$/g, "");
   return (p || "home").replace(/[^a-z0-9/_-]+/gi, "-").split("/").pop()!.toLowerCase() || "home";
 }
-
-const yaml = (s: string) => (/[:#'"\n]|^\s|\s$/.test(s) ? JSON.stringify(s) : s);
 
 async function main() {
   console.log(`Reading sitemaps from ${SITE} …`);
@@ -163,14 +171,13 @@ async function main() {
       footer.find("script, style, noscript, svg, img, form, button, [class*='ct-chat']").remove();
       const md = td.turndown(footer.html() ?? "").replace(/\n{3,}/g, "\n\n").trim();
       if (md) {
-        const rel = path.join("page", "contact-details.md");
-        fs.mkdirSync(path.join(OUT_DIR, "page"), { recursive: true });
-        fs.writeFileSync(
-          path.join(OUT_DIR, rel),
-          `---\ntitle: CodeTrappers Contact Details and Site Directory\nurl: ${SITE}/contact/\naccess: public\ntype: page\n---\n\n` +
-            `# CodeTrappers Contact Details and Site Directory\n\nPhone, email, office address, social profiles, legal entity and the full list of services and solutions, as shown in the footer of every page on codetrappers.com.\n\n${md}\n`,
-          "utf8"
-        );
+        const rel = path.join("page", "contact-details.pdf");
+        const title = "CodeTrappers Contact Details and Site Directory";
+        const description =
+          "Phone, email, office address, social profiles, legal entity and the full list of services and solutions, as shown in the footer of every page on codetrappers.com.";
+        await save(rel, `# ${title}\n\n${description}\n\n${md}\n`, {
+          title, description, url: `${SITE}/contact/`, access: "public", type: "page",
+        });
         written.add(rel);
         console.log(`saved    ${rel} (site footer)`);
       }
@@ -183,20 +190,17 @@ async function main() {
     while (next < targets.length) {
       const { url, type } = targets[next++];
       try {
-        const { title, md } = toMarkdown(await get(url), url);
+        const { title, description, md } = toMarkdown(await get(url), url);
         const bodyChars = md.replace(/^# .*$/m, "").trim().length;
         if (bodyChars < MIN_CHARS) {
           skipped++;
           console.log(`thin     ${url}`);
           continue;
         }
-        let rel = path.join(type, `${slugFor(url)}.md`);
-        if (written.has(rel)) rel = path.join(type, `${slugFor(url)}-${written.size}.md`);
-        const file = path.join(OUT_DIR, rel);
-        fs.mkdirSync(path.dirname(file), { recursive: true });
-        const front = `---\ntitle: ${yaml(title)}\nurl: ${url}\naccess: public\ntype: ${type}\n---\n\n`;
-        fs.writeFileSync(file, front + md + "\n", "utf8");
-        written.add(rel);
+        let rel = path.join(type, `${slugFor(url)}.pdf`);
+        if (written.has(rel)) rel = path.join(type, `${slugFor(url)}-${written.size}.pdf`);
+        written.add(rel); // reserve the name before the async write
+        await save(rel, md, { title, description, url, access: "public", type });
         console.log(`saved    ${rel} (${bodyChars} chars)`);
       } catch (e) {
         failed.push(url);

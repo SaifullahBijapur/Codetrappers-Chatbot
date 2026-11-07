@@ -1,13 +1,18 @@
 /**
- * Incremental ingestion: reads ./content/**\/*.md, chunks, embeds (Voyage), and
- * stores in Supabase. Unchanged files are skipped; removed files are deleted.
+ * Incremental ingestion: reads ./content/**\/*.{pdf,md}, chunks, embeds (Voyage),
+ * and stores in Supabase. Unchanged files are skipped; removed files are deleted.
  *
- * Front matter per file:
+ * PDF files (the scraped website, see scripts/scrape.ts): title from the PDF Title,
+ * and url/access/type from the Keywords field as "url=...; access=public; type=page".
+ * PDFs without those fields still work (title falls back to the file name, access
+ * to public).
+ *
+ * Markdown files use front matter:
  *   ---
- *   title: Python Basics: Loops
- *   url: /courses/python-basics/loops
+ *   title: Plans and Pricing
+ *   url: /pricing
  *   access: public        # public | enrolled | paid
- *   type: lesson
+ *   type: pricing
  *   ---
  */
 import fs from "node:fs";
@@ -16,6 +21,7 @@ import { createHash } from "node:crypto";
 import { createClient } from "@supabase/supabase-js";
 import { chunkMarkdown } from "../lib/chunk";
 import { embed } from "../lib/voyage";
+import { readPdf } from "../lib/pdf";
 
 const db = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!, {
   auth: { persistSession: false },
@@ -26,7 +32,7 @@ const CONTENT_DIR = path.join(process.cwd(), "content");
 function walk(dir: string): string[] {
   return fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
     const p = path.join(dir, e.name);
-    return e.isDirectory() ? walk(p) : p.endsWith(".md") ? [p] : [];
+    return e.isDirectory() ? walk(p) : /\.(md|pdf)$/i.test(p) ? [p] : [];
   });
 }
 
@@ -50,9 +56,8 @@ async function main() {
   for (const file of files) {
     const rel = path.relative(CONTENT_DIR, file);
     seen.add(rel);
-    const raw = fs.readFileSync(file, "utf8");
-    const hash = createHash("sha256").update(raw).digest("hex");
-    const { meta, body } = parse(raw);
+    const bytes = fs.readFileSync(file);
+    const hash = createHash("sha256").update(bytes).digest("hex");
 
     const { data: existing } = await db
       .from("documents").select("id, content_hash").eq("source_path", rel).maybeSingle();
@@ -61,7 +66,21 @@ async function main() {
       continue;
     }
 
-    const title = meta.title ?? path.basename(file, ".md");
+    // PDFs (from `npm run scrape` or added by hand) carry their metadata in the
+    // PDF info dictionary; Markdown files use front matter.
+    let meta: Record<string, string>;
+    let body: string;
+    if (/\.pdf$/i.test(file)) {
+      const pdf = await readPdf(bytes);
+      meta = Object.fromEntries(
+        Object.entries(pdf.meta).filter((kv): kv is [string, string] => typeof kv[1] === "string" && kv[1] !== "")
+      );
+      body = pdf.markdown;
+    } else {
+      ({ meta, body } = parse(bytes.toString("utf8")));
+    }
+
+    const title = meta.title ?? path.basename(file, path.extname(file));
     const access = ["public", "enrolled", "paid"].includes(meta.access) ? meta.access : "public";
 
     const { data: doc, error } = await db.from("documents").upsert(
